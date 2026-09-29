@@ -48,6 +48,18 @@ button.link{background:none;border:0;color:var(--muted);font:inherit;cursor:poin
 #ed{min-height:340px;outline:none}#ed:empty:before{content:'Write your post…';color:var(--muted)}
 .msg{color:#c0392b;font-size:14px;margin:0 0 14px}
 .empty{color:var(--muted);text-align:center;padding:70px 0}
+.react{margin-top:44px;padding-top:20px;border-top:1px solid var(--line)}
+.heart{display:inline-flex;align-items:center;gap:8px;background:none;border:1px solid var(--line);border-radius:999px;padding:7px 16px;font:15px system-ui,sans-serif;color:var(--muted);cursor:pointer}
+.heart:hover{background:var(--soft)}.heart.on{color:#e0245e;border-color:#e0245e}
+.comments h3{font:600 1.3rem 'Warnock Pro',Palatino,Georgia,serif;margin:28px 0 8px}
+.cm{padding:12px 0;border-bottom:1px solid var(--line)}
+.cm .who{font-size:14px;color:var(--muted)}.cm .who b{color:var(--fg);font-weight:600}
+.cm p{margin:4px 0 0;white-space:pre-wrap;overflow-wrap:break-word}
+.cf{display:flex;flex-direction:column;gap:8px;margin-top:20px}
+.cf input,.cf textarea{font:inherit;color:var(--fg);background:var(--soft);border:1px solid var(--line);border-radius:6px;padding:8px 10px;width:100%}
+.cf textarea{min-height:90px;resize:vertical}
+.cf .btn{align-self:flex-start}
+.hp{position:absolute;left:-9999px;height:0;overflow:hidden}
 @media (max-width:520px){.item .thumb{width:88px;height:68px}.title{font-size:2.1rem}}
 </style>
 </head><body>
@@ -131,9 +143,52 @@ function viewPost(id) {
     el('div', { className: 'byline' }, el('span', {}, 'by ', el('b', {}, AUTHOR)), el('span', {}, fmtDate(p.date)), el('span', {}, readMins(p) + ' min read')),
     p.cover ? el('img', { className: 'hero', src: p.cover, alt: '' }) : '',
     body);
+    root.append(interactions(p));
   if (admin) root.append(el('div', { className: 'actions' },
     el('a', { href: '#/edit/' + p.id }, 'Edit'),
     el('button', { className: 'link', onclick: async () => { if (!confirm('Delete this post?')) return; await api('DELETE', '/api/posts/' + p.id); await load(); location.hash = '#/'; } }, 'Delete')));
+}
+// ---- Hearts & comments ----
+const vid = (() => {
+  try { let v = localStorage.getItem('vid'); if (!v) { v = crypto.randomUUID(); localStorage.setItem('vid', v); } return v; }
+  catch (e) { return crypto.randomUUID(); }
+})();
+const pub = (method, url, body) => api(method, url, body, { 'x-vid': vid });
+
+function interactions(p) {
+  const heart = el('button', { className: 'heart', title: 'Heart this post' });
+  const list = el('div'), err = el('p', { className: 'msg' });
+  const paint = d => {
+    heart.className = 'heart' + (d.liked ? ' on' : '');
+    heart.textContent = (d.liked ? '♥' : '♡') + ' ' + d.hearts;
+    list.replaceChildren();
+    d.comments.forEach(c => list.append(el('div', { className: 'cm' },
+      el('div', { className: 'who' }, el('b', {}, c.name), ' · ' + fmtDate(c.date),
+        admin ? [' · ', el('button', { className: 'link', onclick: async () => {
+          if (!confirm('Delete this comment?')) return;
+          try { await api('DELETE', '/api/posts/' + p.id + '/comments/' + c.id); paint(await pub('GET', '/api/posts/' + p.id + '/interactions')); } catch (e) { alert(e.message); }
+        } }, 'Delete')] : ''),
+      el('p', {}, c.text))));
+    count.textContent = d.comments.length ? 'Comments (' + d.comments.length + ')' : 'Comments';
+  };
+  const count = el('h3', {});
+  heart.onclick = async () => { try { paint(await pub('POST', '/api/posts/' + p.id + '/heart')); } catch (e) { alert(e.message); } };
+
+  const name = el('input', { placeholder: 'Name (optional)', maxLength: 40 });
+  const text = el('textarea', { placeholder: 'Leave a comment…', maxLength: 1500 });
+  const trap = el('input', { name: 'website', tabIndex: -1, autocomplete: 'off' });
+  const send = el('button', { className: 'btn', onclick: async () => {
+    err.textContent = '';
+    try {
+      paint(await pub('POST', '/api/posts/' + p.id + '/comments', { name: name.value, text: text.value, website: trap.value }));
+      text.value = '';
+    } catch (e) { err.textContent = e.message; }
+  } }, 'Post comment');
+  const form = el('div', { className: 'cf' }, name, text, el('div', { className: 'hp' }, trap), err, send);
+
+  const box = el('div', { className: 'react comments' }, heart, count, list, form);
+  pub('GET', '/api/posts/' + p.id + '/interactions').then(paint).catch(() => {});
+  return box;
 }
 function viewEditor(id) {
   if (!admin) return root.append(el('div', { className: 'empty' }, 'Please log in to write posts.'));

@@ -15,7 +15,7 @@ const storageError = (what, detail) => {
   const e = new Error(what); e.http = 502; e.publicMsg = 'Storage error: could not ' + what + '. Check the server logs.'; return e;
 };
 
-function githubStore() {
+function githubStore(FILE) {
   const { GITHUB_TOKEN: TOKEN, GITHUB_REPO: REPO } = process.env;
   const BRANCH = process.env.GITHUB_BRANCH || 'main', API = process.env.GITHUB_API || 'https://api.github.com';
   let sha = null;
@@ -31,14 +31,14 @@ function githubStore() {
   };
   return {
     async load() {
-      const r = await call('GET', 'posts.json');
+      const r = await call('GET', FILE);
       if (r.status === 404) return [];
       if (!r.ok) throw new Error('GitHub said ' + r.status + ': ' + await r.text() + ' (check GITHUB_TOKEN, GITHUB_REPO and that the repo has a ' + BRANCH + ' branch)');
       const j = await r.json(); sha = j.sha;
-      const text = j.encoding === 'base64' ? Buffer.from(j.content, 'base64').toString() : await (await call('GET', 'posts.json', null, true)).text();
+      const text = j.encoding === 'base64' ? Buffer.from(j.content, 'base64').toString() : await (await call('GET', FILE, null, true)).text();
       return JSON.parse(text);
     },
-    async save(posts) { sha = (await put('posts.json', Buffer.from(JSON.stringify(posts, null, 2)), 'Update posts', true)).content.sha; },
+    async save(data) { sha = (await put(FILE, Buffer.from(JSON.stringify(data, null, 2)), 'Update ' + FILE, true)).content.sha; },
     async putImage(name, buf) { await put('uploads/' + name, buf, 'Upload image', false); },
     async getImage(name) {
       const r = await call('GET', 'uploads/' + name, null, true);
@@ -49,25 +49,49 @@ function githubStore() {
   };
 }
 
-function localStore() {
-  const DIR = process.env.DATA_DIR || path.join(__dirname, 'data'), UP = path.join(DIR, 'uploads'), FILE = path.join(DIR, 'posts.json');
+function localStore(NAME) {
+  const DIR = process.env.DATA_DIR || path.join(__dirname, 'data'), UP = path.join(DIR, 'uploads'), FILE = path.join(DIR, NAME);
   fs.mkdirSync(UP, { recursive: true });
   return {
     async load() { return fs.existsSync(FILE) ? JSON.parse(fs.readFileSync(FILE, 'utf8')) : []; },
-    async save(posts) { fs.writeFileSync(FILE + '.tmp', JSON.stringify(posts, null, 2)); fs.renameSync(FILE + '.tmp', FILE); },
+    async save(data) { fs.writeFileSync(FILE + '.tmp', JSON.stringify(data, null, 2)); fs.renameSync(FILE + '.tmp', FILE); },
     async putImage(name, buf) { fs.writeFileSync(path.join(UP, name), buf); },
     async getImage(name) { const f = path.join(UP, name); return fs.existsSync(f) ? fs.readFileSync(f) : null; },
   };
 }
 
 const usingGitHub = !!(process.env.GITHUB_TOKEN && process.env.GITHUB_REPO);
-const store = usingGitHub ? githubStore() : localStore();
+const make = f => usingGitHub ? githubStore(f) : localStore(f);
+const store = make('posts.json'), istore = make('interactions.json');
 let posts = [], chain = Promise.resolve();
 // Changes run one at a time so saves never collide. fn(posts) returns [newList | null, result].
 const mutate = fn => {
   const run = chain.then(async () => { const [next, result] = fn(posts); if (next) { await store.save(next); posts = next; } return result; });
   chain = run.catch(() => {}); return run;
 };
+
+// ---------- hearts & comments ----------
+// inter = { [postId]: { hearts: [voterHash, ...], comments: [{ id, name, text, date }] } }
+let inter = {}, dirty = false, timer = null, saving = Promise.resolve();
+const box = id => inter[id] || (inter[id] = { hearts: [], comments: [] });
+const flush = () => {
+  clearTimeout(timer); timer = null;
+  if (!dirty) return saving;
+  dirty = false;
+  saving = saving.then(() => istore.save(inter)).catch(e => { dirty = true; console.error('Could not save interactions:', e.message); });
+  return saving;
+};
+const queueSave = () => { dirty = true; if (!timer) timer = setTimeout(flush, 8000); };
+process.on('SIGTERM', async () => { await flush(); process.exit(0); });
+
+const hits = new Map();
+setInterval(() => hits.clear(), 3600000).unref();
+function limit(req, key, max, ms = 600000) {
+  const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress).split(',')[0].trim();
+  const k = key + ip, now = Date.now(), a = (hits.get(k) || []).filter(t => now - t < ms);
+  if (a.length >= max) return false;
+  a.push(now); hits.set(k, a); return true;
+}
 
 // ---------- auth ----------
 const sha256 = s => crypto.createHash('sha256').update(s).digest();
@@ -81,6 +105,8 @@ function checkAuth(req) {
   if (!ok) { f.n++; fails.set(ip, f); }
   return ok ? 'ok' : 'bad';
 }
+const voter = req => { const v = String(req.headers['x-vid'] || ''); return /^[\w-]{8,64}$/.test(v) ? sha256(v).toString('hex').slice(0, 16) : null; };
+const view = (id, vid) => { const d = box(id); return { hearts: d.hearts.length, liked: !!vid && d.hearts.includes(vid), comments: d.comments }; };
 
 // ---------- http ----------
 const HEAD = {
@@ -123,12 +149,48 @@ const server = http.createServer(async (req, res) => {
       return res.end(img);
     }
 
+    // ---- public: hearts & comments (no admin password needed) ----
+    const ix = p.match(/^\/api\/posts\/([\w-]+)\/(interactions|heart|comments)$/);
+    if (ix) {
+      const id = ix[1], vid = voter(req);
+      if (!posts.some(x => x.id === id)) return send(res, 404, { error: 'Not found' });
+      if (req.method === 'GET' && ix[2] === 'interactions') return send(res, 200, view(id, vid));
+      if (req.method === 'POST' && ix[2] === 'heart') {
+        if (!vid) return send(res, 400, { error: 'Missing visitor id' });
+        if (!limit(req, 'h', 30)) return send(res, 429, { error: 'Slow down a little.' });
+        const d = box(id), i = d.hearts.indexOf(vid);
+        if (i < 0) d.hearts.push(vid); else d.hearts.splice(i, 1);
+        queueSave();
+        return send(res, 200, view(id, vid));
+      }
+      if (req.method === 'POST' && ix[2] === 'comments') {
+        if (!limit(req, 'c', 5)) return send(res, 429, { error: 'Too many comments. Try again in a few minutes.' });
+        const b = await readJson(req);
+        if (b.website) return send(res, 201, view(id, vid)); // honeypot: bots fill this in
+        const name = String(b.name || '').trim().slice(0, 40) || 'Anonymous';
+        const text = String(b.text || '').trim().slice(0, 1500);
+        if (!text) return send(res, 400, { error: 'Please write a comment.' });
+        const d = box(id);
+        if (d.comments.length >= 500) return send(res, 400, { error: 'Comments are closed on this post.' });
+        d.comments.push({ id: crypto.randomUUID(), name, text, date: new Date().toISOString() });
+        queueSave();
+        return send(res, 201, view(id, vid));
+      }
+    }
+
     if (p.startsWith('/api/')) {
       const a = checkAuth(req);
       if (a === 'locked') return send(res, 429, { error: 'Too many attempts. Wait a minute.' });
       if (a !== 'ok') return send(res, 401, { error: 'Wrong password' });
 
       if (req.method === 'POST' && p === '/api/login') return send(res, 200, { ok: true });
+
+      const dc = p.match(/^\/api\/posts\/([\w-]+)\/comments\/([\w-]+)$/);
+      if (dc && req.method === 'DELETE') {
+        const d = inter[dc[1]];
+        if (d) { d.comments = d.comments.filter(c => c.id !== dc[2]); queueSave(); }
+        return send(res, 200, { ok: true });
+      }
 
       if (req.method === 'POST' && p === '/api/upload') {
         const ext = EXT[String(req.headers['content-type']).split(';')[0]];
@@ -154,13 +216,17 @@ const server = http.createServer(async (req, res) => {
         });
         return out ? send(res, 200, out) : send(res, 404, { error: 'Not found' });
       }
-      if (m && req.method === 'DELETE') { await mutate(ps => [ps.filter(x => x.id !== m[1]), true]); return send(res, 200, { ok: true }); }
+      if (m && req.method === 'DELETE') {
+        await mutate(ps => [ps.filter(x => x.id !== m[1]), true]);
+        if (inter[m[1]]) { delete inter[m[1]]; queueSave(); }
+        return send(res, 200, { ok: true });
+      }
     }
     send(res, 404, { error: 'Not found' });
   } catch (e) { send(res, e.http || 400, { error: e.publicMsg || 'Bad request' }); }
 });
 
-store.load().then(p => {
-  posts = p;
+Promise.all([store.load(), istore.load()]).then(([p, i]) => {
+  posts = p; inter = Array.isArray(i) ? {} : i;
   server.listen(PORT, () => console.log('Blog running on port ' + PORT + ' (storage: ' + (usingGitHub ? 'GitHub repo ' + process.env.GITHUB_REPO : 'local files') + ')'));
-}).catch(e => { console.error('Could not load posts:', e.message); process.exit(1); });
+}).catch(e => { console.error('Could not load data:', e.message); process.exit(1); });
