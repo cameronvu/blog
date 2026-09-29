@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My Blog</title>
+<style>
+:root{--bg:#fff;--fg:rgba(0,0,0,.87);--muted:rgba(0,0,0,.54);--line:rgba(0,0,0,.12);--link:#5f9b65;--soft:#f6f6f6}
+@media (prefers-color-scheme:dark){:root{--bg:#1b1b1b;--fg:rgba(255,255,255,.88);--muted:rgba(255,255,255,.58);--line:rgba(255,255,255,.15);--link:#86c08c;--soft:#262626}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,-apple-system,'Segoe UI',Calibri,sans-serif}
+.serif,.body,.title{font-family:'Warnock Pro',Palatino,'Palatino Linotype','Book Antiqua',Georgia,serif}
+a{color:var(--link);text-decoration:none}a:hover{text-decoration:underline}
+.top{display:flex;justify-content:space-between;align-items:center;height:52px;padding:0 20px;border-bottom:1px solid var(--line)}
+.top .brand{font-weight:700;letter-spacing:.06em;text-transform:uppercase;font-size:15px;color:var(--fg)}
+.top nav{display:flex;gap:18px;font-size:14px}
+.top nav a,.top nav button{color:var(--muted);background:none;border:0;font:inherit;cursor:pointer;padding:0}
+.main{max-width:700px;margin:0 auto;padding:36px 20px 100px}
+.item{padding:16px 0;border-bottom:1px solid var(--line)}
+.item h2{margin:0;font:600 1.45rem/1.3 'Warnock Pro',Palatino,Georgia,serif}
+.item h2 a{color:var(--fg)}.item h2 a:hover{color:var(--link);text-decoration:none}
+.meta{color:var(--muted);font-size:13.5px;margin-top:4px}
+.excerpt{margin:8px 0 0;color:var(--muted);font-family:'Warnock Pro',Palatino,Georgia,serif;font-size:1.02rem}
+.title{font-size:2.6rem;line-height:1.15;font-weight:500;margin:0 0 14px;letter-spacing:-.01em;width:100%}
+.byline{color:var(--muted);font-size:14px;margin-bottom:34px;display:flex;gap:12px;flex-wrap:wrap}
+.byline b{color:var(--fg);font-weight:500}
+.body{font-size:1.22rem;line-height:1.62;overflow-wrap:break-word}
+.body p{margin:0 0 1em}.body h2{font-size:1.8rem;line-height:1.25;margin:1.6em 0 .5em;font-weight:600}
+.body h3{font-size:1.4rem;margin:1.4em 0 .4em;font-weight:600}.body h4{font-size:1.15rem;margin:1.2em 0 .3em;font-weight:600}
+.body blockquote{margin:1em 0;padding:.1em 0 .1em 1em;border-left:3px solid var(--line);color:var(--muted)}
+.body ul,.body ol{padding-left:1.6em;margin:0 0 1em}
+.body code{font:.85em ui-monospace,Menlo,Consolas,monospace;background:var(--soft);padding:.1em .35em;border-radius:3px}
+.body pre{font:.85em/1.5 ui-monospace,Menlo,Consolas,monospace;background:var(--soft);padding:12px 14px;border-radius:4px;overflow-x:auto;margin:0 0 1em}
+.body img{max-width:100%;height:auto;display:block;margin:1em auto}
+.body hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.body sup,.body sub{font-size:.7em;line-height:0}
+.actions{margin-top:44px;padding-top:16px;border-top:1px solid var(--line);font-size:14px;display:flex;gap:16px}
+button.btn{background:var(--link);color:#fff;border:0;border-radius:4px;padding:8px 18px;font:600 14px inherit;cursor:pointer}
+button.link{background:none;border:0;color:var(--muted);font:inherit;cursor:pointer;padding:0}
+.tb{position:sticky;top:0;z-index:2;display:flex;flex-wrap:wrap;gap:2px;align-items:center;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:4px;margin-bottom:14px}
+.tb button,.tb select{height:32px;min-width:32px;background:none;border:0;border-radius:4px;color:var(--fg);font:14px system-ui,sans-serif;cursor:pointer}
+.tb button:hover{background:var(--soft)}.tb .sep{width:1px;height:20px;background:var(--line);margin:0 4px}
+.tb select{background:var(--soft);padding:0 6px}
+#ed{min-height:340px;outline:none}#ed:empty:before{content:'Write your post…';color:var(--muted)}
+.msg{color:#c0392b;font-size:14px;margin:0 0 14px}
+.empty{color:var(--muted);text-align:center;padding:70px 0}
+</style>
+</head><body>
+<div class="top"><a class="brand" href="#/" id="brand"></a><nav id="nav"></nav></div>
+<div class="main" id="root"></div>
+<script>
+// ---- Edit these to personalise your blog ----
+const BLOG_TITLE = 'Like I Guess, Bro: A Blog';
+const AUTHOR = 'Benson Goone';
+// ---------------------------------------------
+document.title = BLOG_TITLE;
+document.getElementById('brand').textContent = BLOG_TITLE;
+const root = document.getElementById('root'), nav = document.getElementById('nav');
+let posts = [], admin = false, msg = '', pw = sessionStorage.getItem('pw') || '';
+
+const el = (t, props = {}, ...kids) => { const n = document.createElement(t); Object.assign(n, props); kids.flat().forEach(c => n.append(c)); return n; };
+const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const fmtDate = d => new Date(d).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+
+async function api(method, url, body, headers = {}) {
+  const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json', 'x-admin-password': pw, ...headers }, body: body instanceof Blob ? body : body ? JSON.stringify(body) : undefined });
+  const d = await r.json(); if (!r.ok) throw new Error(d.error || 'Request failed'); return d;
+}
+
+// ---- HTML cleaner (used on render and on paste) ----
+const MAP = { b:'strong', strong:'strong', i:'em', em:'em', u:'u', s:'s', strike:'s', del:'s', sub:'sub', sup:'sup', h1:'h2', h2:'h2', h3:'h3', h4:'h4', p:'p', div:'p', br:'br', blockquote:'blockquote', ul:'ul', ol:'ol', li:'li', a:'a', code:'code', pre:'pre', hr:'hr', img:'img' };
+function clean(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html'), out = document.createElement('div');
+  (function walk(src, dst) {
+    for (const n of src.childNodes) {
+      if (n.nodeType === 3) { dst.append(n.textContent); continue; }
+      if (n.nodeType !== 1) continue;
+      let t = n.localName; const st = n.getAttribute('style') || '';
+      if (/^(script|style|head|title|meta|link|iframe|object|svg|math|noscript|xml)$/.test(t)) continue;
+      if (t === 'span') t = /vertical-align:\s*super/.test(st) ? 'sup' : /vertical-align:\s*sub/.test(st) ? 'sub' : /font-weight:\s*(bold|[6-9]00)/.test(st) ? 'strong' : /font-style:\s*italic/.test(st) ? 'em' : /underline/.test(st) ? 'u' : '';
+      else if ((t === 'b' || t === 'strong') && /font-weight:\s*normal/.test(st)) t = '';
+      const m = MAP[t]; if (!m) { walk(n, dst); continue; }
+      const e = document.createElement(m);
+      if (m === 'a') { const h = (n.getAttribute('href') || '').trim(); if (/^(https?:|mailto:|#|\/(?!\/))/i.test(h)) e.href = h; }
+      if (m === 'img') { const s = n.getAttribute('src') || ''; if (!/^(https?:\/\/|\/uploads\/)/i.test(s)) continue; e.src = s; e.alt = n.getAttribute('alt') || ''; }
+      if (!['br', 'hr', 'img'].includes(m)) walk(n, e);
+      dst.append(e);
+    }
+  })(doc.body, out);
+  return out.innerHTML;
+}
+const postHtml = p => p.html != null ? clean(p.html) : (p.body || '').split(/\n\s*\n/).map(x => '<p>' + esc(x) + '</p>').join('');
+const textOf = p => { const d = document.createElement('div'); d.innerHTML = postHtml(p); return d.textContent.trim(); };
+const readMins = p => Math.max(1, Math.round(textOf(p).split(/\s+/).length / 220));
+
+// ---- Views ----
+function setNav() {
+  nav.replaceChildren();
+  if (admin) nav.append(el('a', { href: '#/new' }, 'New post'), el('button', { onclick: () => { pw = ''; admin = false; sessionStorage.removeItem('pw'); location.hash = '#/'; route(); } }, 'Log out'));
+  else nav.append(el('button', { onclick: login }, 'Login'));
+}
+async function login() {
+  const p = prompt('Admin password:'); if (!p) return;
+  pw = p;
+  try { await api('POST', '/api/login'); admin = true; sessionStorage.setItem('pw', p); msg = ''; } catch (e) { pw = ''; alert(e.message); }
+  route();
+}
+function viewList() {
+  if (!posts.length) return root.append(el('div', { className: 'empty' }, 'No posts yet.'));
+  posts.forEach(p => {
+    const ex = textOf(p); 
+    root.append(el('div', { className: 'item' },
+      el('h2', {}, el('a', { href: '#/post/' + p.id }, p.title)),
+      el('div', { className: 'meta' }, AUTHOR + ' · ' + fmtDate(p.date) + ' · ' + readMins(p) + ' min read'),
+      el('p', { className: 'excerpt' }, ex.length > 220 ? ex.slice(0, 220).trim() + '…' : ex)));
+  });
+}
+function viewPost(id) {
+  const p = posts.find(x => x.id === id);
+  if (!p) return root.append(el('div', { className: 'empty' }, 'Post not found.'));
+  document.title = p.title + ' — ' + BLOG_TITLE;
+  const body = el('div', { className: 'body' }); body.innerHTML = postHtml(p);
+  root.append(el('h1', { className: 'title' }, p.title),
+    el('div', { className: 'byline' }, el('span', {}, 'by ', el('b', {}, AUTHOR)), el('span', {}, fmtDate(p.date)), el('span', {}, readMins(p) + ' min read')), body);
+  if (admin) root.append(el('div', { className: 'actions' },
+    el('a', { href: '#/edit/' + p.id }, 'Edit'),
+    el('button', { className: 'link', onclick: async () => { if (!confirm('Delete this post?')) return; await api('DELETE', '/api/posts/' + p.id); await load(); location.hash = '#/'; } }, 'Delete')));
+}
+function viewEditor(id) {
+  if (!admin) return root.append(el('div', { className: 'empty' }, 'Please log in to write posts.'));
+  const p = id && posts.find(x => x.id === id);
+  document.execCommand('defaultParagraphSeparator', false, 'p');
+  const title = el('input', { className: 'title', placeholder: 'Title', maxLength: 140, value: p ? p.title : '', style: 'border:0;outline:0;background:none;color:inherit' });
+  const ed = el('div', { className: 'body', id: 'ed', contentEditable: true });
+  ed.innerHTML = p ? postHtml(p) : '';
+  let saved = null;
+  const keep = () => { const s = getSelection(); if (s.rangeCount && ed.contains(s.anchorNode)) saved = s.getRangeAt(0).cloneRange(); };
+  const back = () => { ed.focus(); if (saved) { const s = getSelection(); s.removeAllRanges(); s.addRange(saved); } };
+  const run = (c, v) => { back(); document.execCommand(c, false, v); };
+  ed.addEventListener('keyup', keep); ed.addEventListener('mouseup', keep); ed.addEventListener('blur', keep);
+  ed.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && (e.key === '.' || e.key === ',')) { e.preventDefault(); document.execCommand(e.key === '.' ? 'superscript' : 'subscript'); } });
+  ed.addEventListener('paste', e => {
+    e.preventDefault();
+    const h = e.clipboardData.getData('text/html'), t = e.clipboardData.getData('text/plain');
+    document.execCommand('insertHTML', false, h ? clean(h) : esc(t).replace(/\n\n+/g, '</p><p>').replace(/\n/g, '<br>'));
+  });
+  const btn = (label, tip, fn) => el('button', { title: tip, innerHTML: label, onmousedown: e => { e.preventDefault(); keep(); }, onclick: fn });
+  const sep = () => el('span', { className: 'sep' });
+  const block = el('select', { title: 'Text style', onchange: () => { run('formatBlock', '<' + block.value + '>'); block.value = 'p'; } },
+    ...[['p', 'Normal text'], ['h2', 'Heading'], ['h3', 'Subheading'], ['h4', 'Small heading'], ['blockquote', 'Quote'], ['pre', 'Code block']].map(([v, l]) => el('option', { value: v }, l)));
+  block.addEventListener('mousedown', keep);
+  const file = el('input', { type: 'file', accept: 'image/*', style: 'display:none', onchange: async () => {
+    const f = file.files[0]; if (!f) return;
+    try { const r = await api('POST', '/api/upload', f, { 'Content-Type': f.type }); run('insertImage', r.url); } catch (e) { alert(e.message); }
+    file.value = '';
+  } });
+  const tb = el('div', { className: 'tb' }, block, sep(),
+    btn('<b>B</b>', 'Bold (Ctrl+B)', () => run('bold')), btn('<i>I</i>', 'Italic (Ctrl+I)', () => run('italic')),
+    btn('<u>U</u>', 'Underline (Ctrl+U)', () => run('underline')), btn('<s>S</s>', 'Strikethrough', () => run('strikeThrough')), sep(),
+    btn('x<sup>2</sup>', 'Superscript (Ctrl+.)', () => run('superscript')), btn('x<sub>2</sub>', 'Subscript (Ctrl+,)', () => run('subscript')),
+    btn('&lt;/&gt;', 'Inline code', () => { back(); const s = getSelection().toString(); if (s) document.execCommand('insertHTML', false, '<code>' + esc(s) + '</code>'); }), sep(),
+    btn('• List', 'Bulleted list', () => run('insertUnorderedList')), btn('1. List', 'Numbered list', () => run('insertOrderedList')), sep(),
+    btn('Link', 'Insert link', () => { const u = prompt('Link URL (https://…):'); if (u) run('createLink', u); }), btn('Unlink', 'Remove link', () => run('unlink')),
+    btn('Image', 'Insert image', () => file.click()), btn('―', 'Horizontal line', () => run('insertHorizontalRule')), sep(),
+    btn('Clear', 'Clear formatting', () => run('removeFormat')), btn('↶', 'Undo', () => run('undo')), btn('↷', 'Redo', () => run('redo')), file);
+  const err = el('p', { className: 'msg' });
+  const pub = el('button', { className: 'btn', onclick: async () => {
+    try {
+      const data = { title: title.value, html: ed.innerHTML };
+      const r = p ? await api('PUT', '/api/posts/' + p.id, data) : await api('POST', '/api/posts', data);
+      await load(); location.hash = '#/post/' + r.id;
+    } catch (e) { err.textContent = e.message; }
+  } }, p ? 'Save changes' : 'Publish');
+  root.append(title, tb, ed, err, el('div', { className: 'actions', style: 'border:0;margin-top:20px;padding:0' }, pub, el('a', { href: p ? '#/post/' + p.id : '#/' }, 'Cancel')));
+}
+
+async function load() { posts = await api('GET', '/api/posts'); }
+function route() {
+  setNav(); root.replaceChildren(); document.title = BLOG_TITLE; scrollTo(0, 0);
+  const h = location.hash.slice(1) || '/', m = h.match(/^\/(post|edit)\/([\w-]+)$/);
+  if (m && m[1] === 'post') viewPost(m[2]); else if (m && m[1] === 'edit') viewEditor(m[2]);
+  else if (h === '/new') viewEditor(); else viewList();
+}
+window.addEventListener('hashchange', route);
+(async () => {
+  await load();
+  if (pw) { try { await api('POST', '/api/login'); admin = true; } catch (e) { pw = ''; sessionStorage.removeItem('pw'); } }
+  route();
+})();
+</script>
+</body></html>
