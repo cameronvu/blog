@@ -15,14 +15,19 @@ a{color:var(--link);text-decoration:none}a:hover{text-decoration:underline}
 .top nav{display:flex;gap:18px;font-size:14px}
 .top nav a,.top nav button{color:var(--muted);background:none;border:0;font:inherit;cursor:pointer;padding:0}
 .main{max-width:700px;margin:0 auto;padding:36px 20px 100px}
-.item{padding:16px 0;border-bottom:1px solid var(--line)}
+.item{display:flex;gap:16px;align-items:flex-start;padding:16px 0;border-bottom:1px solid var(--line)}
+.item .info{min-width:0;flex:1}
+.item .thumb{width:120px;height:90px;object-fit:cover;border-radius:6px;display:block}
 .item h2{margin:0;font:600 1.45rem/1.3 'Warnock Pro',Palatino,Georgia,serif}
 .item h2 a{color:var(--fg)}.item h2 a:hover{color:var(--link);text-decoration:none}
 .meta{color:var(--muted);font-size:13.5px;margin-top:4px}
 .excerpt{margin:8px 0 0;color:var(--muted);font-family:'Warnock Pro',Palatino,Georgia,serif;font-size:1.02rem}
 .title{font-size:2.6rem;line-height:1.15;font-weight:500;margin:0 0 14px;letter-spacing:-.01em;width:100%}
-.byline{color:var(--muted);font-size:14px;margin-bottom:34px;display:flex;gap:12px;flex-wrap:wrap}
+.byline{color:var(--muted);font-size:14px;margin-bottom:24px;display:flex;gap:12px;flex-wrap:wrap}
 .byline b{color:var(--fg);font-weight:500}
+.hero{display:block;width:100%;max-height:420px;object-fit:cover;border-radius:6px;margin:0 0 28px}
+.cover-row{display:flex;align-items:center;gap:12px;margin-bottom:14px;font-size:14px}
+.cover-row img{width:120px;height:80px;object-fit:cover;border-radius:6px}
 .body{font-size:1.22rem;line-height:1.62;overflow-wrap:break-word}
 .body p{margin:0 0 1em}.body h2{font-size:1.8rem;line-height:1.25;margin:1.6em 0 .5em;font-weight:600}
 .body h3{font-size:1.4rem;margin:1.4em 0 .4em;font-weight:600}.body h4{font-size:1.15rem;margin:1.2em 0 .3em;font-weight:600}
@@ -43,6 +48,7 @@ button.link{background:none;border:0;color:var(--muted);font:inherit;cursor:poin
 #ed{min-height:340px;outline:none}#ed:empty:before{content:'Write your post…';color:var(--muted)}
 .msg{color:#c0392b;font-size:14px;margin:0 0 14px}
 .empty{color:var(--muted);text-align:center;padding:70px 0}
+@media (max-width:520px){.item .thumb{width:88px;height:68px}.title{font-size:2.1rem}}
 </style>
 </head><body>
 <div class="top"><a class="brand" href="#/" id="brand"></a><nav id="nav"></nav></div>
@@ -107,11 +113,13 @@ async function login() {
 function viewList() {
   if (!posts.length) return root.append(el('div', { className: 'empty' }, 'No posts yet.'));
   posts.forEach(p => {
-    const ex = textOf(p); 
+    const ex = textOf(p);
     root.append(el('div', { className: 'item' },
-      el('h2', {}, el('a', { href: '#/post/' + p.id }, p.title)),
-      el('div', { className: 'meta' }, AUTHOR + ' · ' + fmtDate(p.date) + ' · ' + readMins(p) + ' min read'),
-      el('p', { className: 'excerpt' }, ex.length > 220 ? ex.slice(0, 220).trim() + '…' : ex)));
+      p.cover ? el('a', { href: '#/post/' + p.id }, el('img', { className: 'thumb', src: p.cover, alt: '', loading: 'lazy' })) : '',
+      el('div', { className: 'info' },
+        el('h2', {}, el('a', { href: '#/post/' + p.id }, p.title)),
+        el('div', { className: 'meta' }, AUTHOR + ' · ' + fmtDate(p.date) + ' · ' + readMins(p) + ' min read'),
+        el('p', { className: 'excerpt' }, ex.length > 220 ? ex.slice(0, 220).trim() + '…' : ex))));
   });
 }
 function viewPost(id) {
@@ -120,7 +128,9 @@ function viewPost(id) {
   document.title = p.title + ' — ' + BLOG_TITLE;
   const body = el('div', { className: 'body' }); body.innerHTML = postHtml(p);
   root.append(el('h1', { className: 'title' }, p.title),
-    el('div', { className: 'byline' }, el('span', {}, 'by ', el('b', {}, AUTHOR)), el('span', {}, fmtDate(p.date)), el('span', {}, readMins(p) + ' min read')), body);
+    el('div', { className: 'byline' }, el('span', {}, 'by ', el('b', {}, AUTHOR)), el('span', {}, fmtDate(p.date)), el('span', {}, readMins(p) + ' min read')),
+    p.cover ? el('img', { className: 'hero', src: p.cover, alt: '' }) : '',
+    body);
   if (admin) root.append(el('div', { className: 'actions' },
     el('a', { href: '#/edit/' + p.id }, 'Edit'),
     el('button', { className: 'link', onclick: async () => { if (!confirm('Delete this post?')) return; await api('DELETE', '/api/posts/' + p.id); await load(); location.hash = '#/'; } }, 'Delete')));
@@ -162,15 +172,34 @@ function viewEditor(id) {
     btn('Link', 'Insert link', () => { const u = prompt('Link URL (https://…):'); if (u) run('createLink', u); }), btn('Unlink', 'Remove link', () => run('unlink')),
     btn('Image', 'Insert image', () => file.click()), btn('―', 'Horizontal line', () => run('insertHorizontalRule')), sep(),
     btn('Clear', 'Clear formatting', () => run('removeFormat')), btn('↶', 'Undo', () => run('undo')), btn('↷', 'Redo', () => run('redo')), file);
+
+  // ---- Cover image ----
+  let cover = (p && p.cover) || '';
+  const coverImg = el('img');
+  const coverBtn = el('button', { className: 'link', onclick: () => coverFile.click() });
+  const coverRm = el('button', { className: 'link', onclick: () => { cover = ''; drawCover(); } }, 'Remove');
+  const coverFile = el('input', { type: 'file', accept: 'image/*', style: 'display:none', onchange: async () => {
+    const f = coverFile.files[0]; if (!f) return;
+    try { const r = await api('POST', '/api/upload', f, { 'Content-Type': f.type }); cover = r.url; drawCover(); } catch (e) { alert(e.message); }
+    coverFile.value = '';
+  } });
+  const drawCover = () => {
+    if (cover) coverImg.src = cover; else coverImg.removeAttribute('src');
+    coverImg.style.display = coverRm.style.display = cover ? '' : 'none';
+    coverBtn.textContent = cover ? 'Change cover image' : 'Add cover image';
+  };
+  drawCover();
+  const coverRow = el('div', { className: 'cover-row' }, coverImg, coverBtn, coverRm, coverFile);
+
   const err = el('p', { className: 'msg' });
   const pub = el('button', { className: 'btn', onclick: async () => {
     try {
-      const data = { title: title.value, html: ed.innerHTML };
+      const data = { title: title.value, html: ed.innerHTML, cover };
       const r = p ? await api('PUT', '/api/posts/' + p.id, data) : await api('POST', '/api/posts', data);
       await load(); location.hash = '#/post/' + r.id;
     } catch (e) { err.textContent = e.message; }
   } }, p ? 'Save changes' : 'Publish');
-  root.append(title, tb, ed, err, el('div', { className: 'actions', style: 'border:0;margin-top:20px;padding:0' }, pub, el('a', { href: p ? '#/post/' + p.id : '#/' }, 'Cancel')));
+  root.append(title, coverRow, tb, ed, err, el('div', { className: 'actions', style: 'border:0;margin-top:20px;padding:0' }, pub, el('a', { href: p ? '#/post/' + p.id : '#/' }, 'Cancel')));
 }
 
 async function load() { posts = await api('GET', '/api/posts'); }

@@ -102,8 +102,9 @@ const readJson = async req => JSON.parse((await readRaw(req, 1e6)).toString() ||
 function clean(b) {
   const title = String(b.title || '').trim().slice(0, 140);
   const html = sanitize(String(b.html || '').slice(0, 500000));
+  const cover = /^\/uploads\/[\w-]+\.(png|jpg|gif|webp)$/.test(b.cover || '') ? b.cover : '';
   const hasContent = html.replace(/<[^>]*>/g, '').trim() || /<img/.test(html);
-  return title && hasContent ? { title, html } : null;
+  return title && hasContent ? { title, html, cover } : null;
 }
 const EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' };
 const MIME = { png: 'image/png', jpg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
