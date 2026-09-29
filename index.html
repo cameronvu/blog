@@ -134,6 +134,50 @@ function viewList() {
         el('p', { className: 'excerpt' }, ex.length > 220 ? ex.slice(0, 220).trim() + '…' : ex))));
   });
 }
+
+// ---- Hearts & comments ----
+const visitorId = (() => {
+  try { let v = localStorage.getItem('vid'); if (!v) { v = crypto.randomUUID(); localStorage.setItem('vid', v); } return v; }
+  catch (e) { return crypto.randomUUID(); }
+})();
+const publicApi = (method, url, body) => api(method, url, body, { 'x-vid': visitorId });
+
+function interactions(p) {
+  const heart = el('button', { className: 'heart', title: 'Heart this post', textContent: '♡' });
+  const count = el('h3', { textContent: 'Comments' });
+  const list = el('div'), err = el('p', { className: 'msg' });
+  const paint = d => {
+    heart.className = 'heart' + (d.liked ? ' on' : '');
+    heart.textContent = (d.liked ? '♥' : '♡') + ' ' + d.hearts;
+    count.textContent = d.comments.length ? 'Comments (' + d.comments.length + ')' : 'Comments';
+    list.replaceChildren();
+    d.comments.forEach(c => list.append(el('div', { className: 'cm' },
+      el('div', { className: 'who' }, el('b', {}, c.name), ' · ' + fmtDate(c.date),
+        admin ? [' · ', el('button', { className: 'link', onclick: async () => {
+          if (!confirm('Delete this comment?')) return;
+          try { await api('DELETE', '/api/posts/' + p.id + '/comments/' + c.id); paint(await publicApi('GET', '/api/posts/' + p.id + '/interactions')); } catch (e) { alert(e.message); }
+        } }, 'Delete')] : ''),
+      el('p', {}, c.text))));
+  };
+  heart.onclick = async () => { try { paint(await publicApi('POST', '/api/posts/' + p.id + '/heart')); } catch (e) { alert(e.message); } };
+
+  const name = el('input', { placeholder: 'Name (optional)', maxLength: 40 });
+  const text = el('textarea', { placeholder: 'Leave a comment…', maxLength: 1500 });
+  const trap = el('input', { name: 'website', tabIndex: -1, autocomplete: 'off' });
+  const sendBtn = el('button', { className: 'btn', onclick: async () => {
+    err.textContent = '';
+    try {
+      paint(await publicApi('POST', '/api/posts/' + p.id + '/comments', { name: name.value, text: text.value, website: trap.value }));
+      text.value = '';
+    } catch (e) { err.textContent = e.message; }
+  } }, 'Post comment');
+  const form = el('div', { className: 'cf' }, name, text, el('div', { className: 'hp' }, trap), err, sendBtn);
+
+  const wrap = el('div', { className: 'react comments' }, heart, count, list, form);
+  publicApi('GET', '/api/posts/' + p.id + '/interactions').then(paint).catch(e => { err.textContent = 'Could not load comments: ' + e.message; });
+  return wrap;
+}
+
 function viewPost(id) {
   const p = posts.find(x => x.id === id);
   if (!p) return root.append(el('div', { className: 'empty' }, 'Post not found.'));
@@ -143,52 +187,10 @@ function viewPost(id) {
     el('div', { className: 'byline' }, el('span', {}, 'by ', el('b', {}, AUTHOR)), el('span', {}, fmtDate(p.date)), el('span', {}, readMins(p) + ' min read')),
     p.cover ? el('img', { className: 'hero', src: p.cover, alt: '' }) : '',
     body);
-    root.append(interactions(p));
+  root.append(interactions(p));
   if (admin) root.append(el('div', { className: 'actions' },
     el('a', { href: '#/edit/' + p.id }, 'Edit'),
     el('button', { className: 'link', onclick: async () => { if (!confirm('Delete this post?')) return; await api('DELETE', '/api/posts/' + p.id); await load(); location.hash = '#/'; } }, 'Delete')));
-}
-// ---- Hearts & comments ----
-const vid = (() => {
-  try { let v = localStorage.getItem('vid'); if (!v) { v = crypto.randomUUID(); localStorage.setItem('vid', v); } return v; }
-  catch (e) { return crypto.randomUUID(); }
-})();
-const pub = (method, url, body) => api(method, url, body, { 'x-vid': vid });
-
-function interactions(p) {
-  const heart = el('button', { className: 'heart', title: 'Heart this post' });
-  const list = el('div'), err = el('p', { className: 'msg' });
-  const paint = d => {
-    heart.className = 'heart' + (d.liked ? ' on' : '');
-    heart.textContent = (d.liked ? '♥' : '♡') + ' ' + d.hearts;
-    list.replaceChildren();
-    d.comments.forEach(c => list.append(el('div', { className: 'cm' },
-      el('div', { className: 'who' }, el('b', {}, c.name), ' · ' + fmtDate(c.date),
-        admin ? [' · ', el('button', { className: 'link', onclick: async () => {
-          if (!confirm('Delete this comment?')) return;
-          try { await api('DELETE', '/api/posts/' + p.id + '/comments/' + c.id); paint(await pub('GET', '/api/posts/' + p.id + '/interactions')); } catch (e) { alert(e.message); }
-        } }, 'Delete')] : ''),
-      el('p', {}, c.text))));
-    count.textContent = d.comments.length ? 'Comments (' + d.comments.length + ')' : 'Comments';
-  };
-  const count = el('h3', {});
-  heart.onclick = async () => { try { paint(await pub('POST', '/api/posts/' + p.id + '/heart')); } catch (e) { alert(e.message); } };
-
-  const name = el('input', { placeholder: 'Name (optional)', maxLength: 40 });
-  const text = el('textarea', { placeholder: 'Leave a comment…', maxLength: 1500 });
-  const trap = el('input', { name: 'website', tabIndex: -1, autocomplete: 'off' });
-  const send = el('button', { className: 'btn', onclick: async () => {
-    err.textContent = '';
-    try {
-      paint(await pub('POST', '/api/posts/' + p.id + '/comments', { name: name.value, text: text.value, website: trap.value }));
-      text.value = '';
-    } catch (e) { err.textContent = e.message; }
-  } }, 'Post comment');
-  const form = el('div', { className: 'cf' }, name, text, el('div', { className: 'hp' }, trap), err, send);
-
-  const box = el('div', { className: 'react comments' }, heart, count, list, form);
-  pub('GET', '/api/posts/' + p.id + '/interactions').then(paint).catch(() => {});
-  return box;
 }
 function viewEditor(id) {
   if (!admin) return root.append(el('div', { className: 'empty' }, 'Please log in to write posts.'));
@@ -247,14 +249,14 @@ function viewEditor(id) {
   const coverRow = el('div', { className: 'cover-row' }, coverImg, coverBtn, coverRm, coverFile);
 
   const err = el('p', { className: 'msg' });
-  const pub = el('button', { className: 'btn', onclick: async () => {
+  const pubBtn = el('button', { className: 'btn', onclick: async () => {
     try {
       const data = { title: title.value, html: ed.innerHTML, cover };
       const r = p ? await api('PUT', '/api/posts/' + p.id, data) : await api('POST', '/api/posts', data);
       await load(); location.hash = '#/post/' + r.id;
     } catch (e) { err.textContent = e.message; }
   } }, p ? 'Save changes' : 'Publish');
-  root.append(title, coverRow, tb, ed, err, el('div', { className: 'actions', style: 'border:0;margin-top:20px;padding:0' }, pub, el('a', { href: p ? '#/post/' + p.id : '#/' }, 'Cancel')));
+  root.append(title, coverRow, tb, ed, err, el('div', { className: 'actions', style: 'border:0;margin-top:20px;padding:0' }, pubBtn, el('a', { href: p ? '#/post/' + p.id : '#/' }, 'Cancel')));
 }
 
 async function load() { posts = await api('GET', '/api/posts'); }
